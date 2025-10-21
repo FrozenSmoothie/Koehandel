@@ -1,58 +1,36 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
+*.pyo
+*.pyd
+*.pyc
 
-# Virtual environments
-.venv/
-venv/
-ENV/
+# Virtualenv
 env/
+venv/
+.venv/
 
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
-*.egg
-*.whl
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage
-htmlcov/
-.tox/
-.nox/
-.coverage
-.cache
-.pytest_cache/
-nosetests.xml
-coverage.xml
-
-# IDEs and editors
-.vscode/
+# PyCharm
 .idea/
-*.sublime-project
-*.sublime-workspace
+*.iml
+.idea/*
 
-# OS-specific
+# Results / experiment outputs
+results_test/
+results/
+logs/
+*.tfevents*
+*.pkl
+progress.csv
+result.json
+basic-variant-state-*.json
+experiment_state-*.json
+
+# macOS / Windows
 .DS_Store
 Thumbs.db
 
-# Jupyter Notebooks
-.ipynb_checkpoints/
-
-# dotenv
-.env
-.env.*
-
-# MyPy
-.mypy_cache/
-
-# PyInstaller
-*.spec
-
-venv/
-
-results/
+# Editor backups
+*~
+*.swp
+.vscode/
