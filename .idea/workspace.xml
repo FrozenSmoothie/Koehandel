@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="3354f4bd-5691-4d03-bee4-7be488ef9d79" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/.idea/Koehandel.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/Koehandel_train.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/check_training_status.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/debug_metrics.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/diagnose_actions.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/koehandel_game_engine.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/monitor_training.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test_all.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test_api_compliance.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test_basic.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test_interactive.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test_quick_training.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test_suite.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test_visual.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/visualize_training.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 1
+}]]></component>
+  <component name="ProjectId" id="34N1a9RpAQNpxFtbumWBQqOix5z" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "master"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-164cda30dcd9-0af03a5fa574-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-252.26830.99" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="3354f4bd-5691-4d03-bee4-7be488ef9d79" name="Changes" comment="" />
+      <created>1761039276658</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1761039276658</updated>
+    </task>
+    <servers />
+  </component>
+</project>
