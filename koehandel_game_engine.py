@@ -651,11 +651,13 @@ class KoehandelPettingZooEnv(AECEnv):
         "render_fps": 2,
     }
 
-    def __init__(self, num_players: int = 4, render_mode: Optional[str] = None):
+    def __init__(self, num_players: int = 4, render_mode: Optional[str] = None, max_turns: Optional[int] = None):
         super().__init__()
 
         self.num_players = num_players
         self.render_mode = render_mode
+        # store max_turns (None means no enforced cap)
+        self.max_turns = int(max_turns) if max_turns is not None else None
 
         self.possible_agents = [f"player_{i}" for i in range(num_players)]
 
