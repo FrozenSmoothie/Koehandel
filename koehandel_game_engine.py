@@ -82,16 +82,26 @@ class Player:
         return sum(c.value for c in self.money_cards)
 
     def calculate_score(self, quartet_values: Dict[str, int]) -> int:
+        """
+        Calculate final score for the player according to rule:
+          final_score = total_points * number_of_quartets
+        where total_points = sum(points_per_quartet * quartets_of_that_type)
+        and number_of_quartets = total number of completed quartets the player has.
+
+        This returns an integer final score (0 if no quartets).
+        """
         counts = self.get_animal_counts()
-        s = 0
+        total_points = 0
         quartets = 0
         for animal_type, cnt in counts.items():
-            if cnt == 4:
-                s += quartet_values[animal_type]
+            if cnt >= 4:
+                pts = quartet_values.get(animal_type, 0)
+                total_points += pts
                 quartets += 1
-        self.score = s
+        final_score = int(total_points * quartets) if quartets > 0 else 0
+        self.score = final_score
         self.quartets_completed = quartets
-        return s
+        return final_score
 
     def get_diversity_score(self) -> float:
         counts = self.get_animal_counts()
@@ -109,7 +119,7 @@ class Player:
         prog = 0.0
         for animal_type, cnt in counts.items():
             base = quartet_values[animal_type]
-            if cnt == 4:
+            if cnt >= 4:
                 prog += base
             elif cnt == 3:
                 prog += base * 0.4
@@ -269,7 +279,7 @@ class KoehandelGame:
             self.previous_diversity[name] = current_div
 
             for animal_type, cnt in player.get_animal_counts().items():
-                if cnt == 4 and animal_type not in player.quartets_completion_turns:
+                if cnt >= 4 and animal_type not in player.quartets_completion_turns:
                     player.quartets_completion_turns[animal_type] = self.turn
                     self.quartets_completed_log.append((name, animal_type, self.turn))
                     base = self.quartet_values[animal_type]
@@ -965,7 +975,10 @@ class KoehandelPettingZooEnv(AECEnv):
 
     def _handle_game_end(self):
         winners = self.game.get_winners()
-        max_possible_score = sum(points for _, points in KoehandelGame.ANIMAL_TYPES) or 1
+        # Normalize to the truly maximum possible final score (total points * number_of_quartets)
+        sum_points = sum(points for _, points in KoehandelGame.ANIMAL_TYPES)
+        max_quartets = len(KoehandelGame.ANIMAL_TYPES)
+        max_possible_score = max(1, sum_points * max_quartets)
         for agent in self.agents:
             player = self.game.players[agent]
             normalized_score = player.score / max_possible_score
