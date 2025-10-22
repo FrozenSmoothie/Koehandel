@@ -18,6 +18,7 @@ venv/
 # Results / experiment outputs
 results_test/
 results/
+replays/
 logs/
 *.tfevents*
 *.pkl
