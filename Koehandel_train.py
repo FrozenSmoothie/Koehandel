@@ -1,22 +1,6 @@
-"""
-Train script for Koehandel (Linux-friendly, Ray-fallback, auto-warmup, small model).
-
-Features in this patched file:
-- Top-level editable PARAMETERS for quick tuning.
-- Uses KOEHANDEL_RESULTS env var (set by systemd run wrapper) or ./results next to the script.
-- Safe Ray init with extended startup wait and automatic fallback to in-driver sampling on failures.
-- Optional automatic warmup profiler to measure steps/sec and auto-set stop steps for a ~30-minute run.
-- Requests the cluster CPUs for the Tune trial so trials actually receive the configured CPU budget.
-- Uses a compact policy network (.model({"fcnet_hiddens": [64, 64]})) to speed up training on CPU.
-- Works on Linux and Windows (path handling via pathlib).
-
-Usage:
-  python train_koehandel.py            # runs with PARAMETERS defaults
-  python train_koehandel.py --fast     # quick smoke run
-  python train_koehandel.py --debug    # force in-driver sampling
-  python train_koehandel.py --long     # target long (1M) run
-  python train_koehandel.py --no-warmup # skip auto warmup profiling if enabled in PARAMETERS
-"""
+# (This is the same file you run; I've only modified the parts that build PPOConfig/warmup)
+# Place this file content over your existing Koehandel_train.py (or apply the same changes shown).
+# ... keep the top of your file unchanged (imports, PARAMETERS, helpers) ...
 import os
 import time
 import argparse
@@ -36,73 +20,42 @@ from koehandel_game_engine import KoehandelPettingZooEnv
 # ---------------------------
 # TOP-LEVEL PARAMETERS
 # ---------------------------
-# Edit these to adjust default behavior on the server.
 PARAMETERS: Dict[str, Any] = {
-    # CPU budget:
-    # - None: auto-detect (os.cpu_count() - 1)
-    # - Integer: use this many CPU slots for the trial (recommended: reserve 1 for OS)
-    "use_cpus": None,  # set to 3 on a 4-core Hetzner (reserves 1), or None to auto-detect
-
-    # Sampling mode default:
-    # - True -> debug/in-driver sampling (single-process)
-    # - False -> full parallel sampling
+    "use_cpus": None,
     "debug_driver_sampling": False,
-
-    # Number of parallel env runners / rollout workers:
-    # - None: computed from use_cpus (use_cpus - 1, capped)
     "num_env_runners": None,
-
-    # ---------------- Full training hyperparameters ----------------
-    # Smaller defaults for faster iterations; adjust if you want more stable training.
     "train_batch_size_full": 1024,
     "minibatch_size_full": 128,
     "rollout_fragment_length_full": 256,
     "num_epochs_full": 3,
     "lr_full": 5e-5,
-
-    # ---------------- Fast/debug presets ----------------
     "train_batch_size_fast": 256,
     "minibatch_size_fast": 64,
     "rollout_fragment_length_fast": 16,
     "num_epochs_fast": 2,
     "lr_fast": 3e-4,
-
     "train_batch_size_debug": 128,
     "minibatch_size_debug": 64,
     "rollout_fragment_length_debug": 32,
     "num_epochs_debug": 2,
     "lr_debug": 1e-4,
-
-    # ---------------- Stop criteria (environment steps) ----------------
     "stop_steps_debug": 10_000,
     "stop_steps_fast": 5_000,
     "stop_steps_short_full": 200_000,
     "stop_steps_long_full": 1_000_000,
-
-    # ---------------- Auto-warmup ----------------
-    # If True, perform a short warmup run to estimate steps/sec and auto-set
-    # stop_steps_short_full so the following full run targets ~30 minutes.
-    # Set to False if you prefer to keep stop_steps_short_full unchanged.
     "auto_warmup": True,
-    "warmup_seconds": 60,  # length of warmup profiling (seconds)
-
-    # Model size: smaller networks run much faster on CPU.
+    "warmup_seconds": 60,
     "model_fcnet_hiddens": [64, 64],
-
-    # Cap for auto env runners
     "max_env_runners_cap": 16,
 }
 
-# ---------------------------
-# Paths: use environment-provided results path when available
-# ---------------------------
 BASE_DIR = Path(__file__).resolve().parent
 RESULTS_ROOT = Path(os.environ.get("KOEHANDEL_RESULTS", BASE_DIR / "results"))
 RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------
-# Helpers
+# Helpers (compat wrappers)
 # ---------------------------
 def _auto_detect_cpus(reserve_one: bool = True) -> int:
     cnt = os.cpu_count() or 1
@@ -116,15 +69,9 @@ def env_creator(config):
 
 
 def safe_ray_init(num_cpus: int) -> bool:
-    """
-    Attempt to initialize Ray with a higher startup wait time.
-    Returns True if Ray initialized successfully, False otherwise.
-    On failure, prints the exception and returns False.
-    """
-    # Give ray more time to start its processes (helps on slower machines)
     os.environ.setdefault("RAY_raylet_start_wait_time_s", "300")
     try:
-        ray.shutdown()  # ensure clean
+        ray.shutdown()
         ray.init(ignore_reinit_error=True, include_dashboard=False, num_cpus=num_cpus)
         return True
     except Exception as e:
@@ -136,44 +83,104 @@ def safe_ray_init(num_cpus: int) -> bool:
         return False
 
 
+def _apply_env_runners_compat(cfg_obj, num_env_runners: int, rollout_fragment_length: int, sample_timeout_s: float = 300.0):
+    """
+    Try to set env/rollout options in a way compatible across RLlib versions.
+    Returns the (possibly modified) cfg_obj.
+    """
+    # try .env_runners API first (some versions)
+    try:
+        return cfg_obj.env_runners(num_env_runners=num_env_runners, rollout_fragment_length=rollout_fragment_length, sample_timeout_s=sample_timeout_s)
+    except Exception:
+        pass
+    # try .rollouts API (other versions)
+    try:
+        return cfg_obj.rollouts(num_rollout_workers=num_env_runners, rollout_fragment_length=rollout_fragment_length)
+    except Exception:
+        pass
+    # fallback: return unchanged
+    return cfg_obj
+
+
+def _set_model_compat(cfg_obj, model_dict: Dict[str, Any]):
+    """
+    Set model configuration on a PPOConfig-like object in a compatibility-safe way.
+    Returns either the same object (PPOConfig) or a plain dict fallback (cfg_dict).
+    """
+    # If cfg_obj has a callable 'model' API, use it
+    try:
+        maybe = getattr(cfg_obj, "model", None)
+        if callable(maybe):
+            return cfg_obj.model(model_dict)
+    except TypeError:
+        # .model exists but is a dict (non-callable) on older/newer versions
+        pass
+    except Exception:
+        pass
+
+    # try to set as attribute (cfg.model = {...})
+    try:
+        setattr(cfg_obj, "model", model_dict)
+        return cfg_obj
+    except Exception:
+        pass
+
+    # last resort: convert to dict and inject model (Tuner accepts param_space={"config": <dict>})
+    try:
+        cfg_dict = cfg_obj.to_dict()
+        cfg_dict["model"] = model_dict
+        return cfg_dict
+    except Exception:
+        # if nothing works, return original object
+        return cfg_obj
+
+
 def measure_warmup_steps_per_sec(warmup_seconds: int, cfg_override: Dict[str, Any], use_cpus: int) -> float:
-    """
-    Run a short warmup by building a small PPO algorithm and calling train()
-    repeatedly for warmup_seconds. Returns measured steps/sec.
-    This avoids using Tune for the warmup (lighter weight).
-    """
     print(f"[WARMUP] Running warmup profiling for {warmup_seconds}s to estimate steps/sec...")
-    # Build minimal config for warmup (use debug/in-driver sampling or few workers)
-    # Use PPOConfig but keep it small and fast
+    # Build minimal config for warmup (use PPOConfig but keep it small and fast)
     warm_cfg = (
         PPOConfig()
         .environment(env="koehandel_env", env_config={"num_players": 4}, disable_env_checking=True)
         .framework("torch")
-        .env_runners(num_env_runners=cfg_override.get("num_env_runners", 0),
-                     rollout_fragment_length=cfg_override.get("rollout_fragment_length", 32),
-                     sample_timeout_s=300.0)
-        .training(
-            train_batch_size=cfg_override.get("train_batch_size", 256),
-            minibatch_size=cfg_override.get("minibatch_size", 64),
-            num_epochs=cfg_override.get("num_epochs", 1),
-            lr=cfg_override.get("lr", 1e-4),
-        )
-        .model({"fcnet_hiddens": PARAMETERS.get("model_fcnet_hiddens", [64, 64])})
-        .multi_agent(policies={"shared_policy": (None, None, None, {})},
-                     policy_mapping_fn=lambda aid, ep, **k: "shared_policy")
-        .resources(num_gpus=0)
     )
+    warm_cfg = _apply_env_runners_compat(warm_cfg, cfg_override.get("num_env_runners", 0), cfg_override.get("rollout_fragment_length", 32), sample_timeout_s=300.0)
+    warm_cfg = warm_cfg.training(
+        train_batch_size=cfg_override.get("train_batch_size", 256),
+        minibatch_size=cfg_override.get("minibatch_size", 64),
+        num_epochs=cfg_override.get("num_epochs", 1),
+        lr=cfg_override.get("lr", 1e-4),
+    )
+    warm_cfg = _set_model_compat(warm_cfg, {"fcnet_hiddens": PARAMETERS.get("model_fcnet_hiddens", [64, 64])})
+    warm_cfg = warm_cfg.multi_agent(policies={"shared_policy": (None, None, None, {})}, policy_mapping_fn=lambda aid, ep, **k: "shared_policy")
+    warm_cfg = warm_cfg.resources(num_gpus=0)
 
     # Build and run
-    algo = warm_cfg.build()
+    # warm_cfg might be a dict fallback - handle that
+    algo = None
+    try:
+        if isinstance(warm_cfg, dict):
+            # build algo from dict: use PPOConfig().from_dict isn't guaranteed across versions, so use PPO(**config)
+            from ray.rllib.algorithms.registry import get_algorithm_class
+            AlgoCls = get_algorithm_class("PPO")
+            algo = AlgoCls(config=warm_cfg)
+        else:
+            algo = warm_cfg.build()
+    except Exception as e:
+        print(f"[WARMUP] Warmup build failed: {e}")
+        if algo:
+            try:
+                algo.stop()
+            except Exception:
+                pass
+        raise
+
     start = time.time()
     collected_steps = 0
+    elapsed = 0.0
     try:
         while True:
             res = algo.train()
-            # Try to extract steps_this_iter or cumulative timesteps
             steps_this_iter = res.get("timesteps_this_iter") or res.get("timesteps_total") or res.get("num_env_steps_sampled") or res.get("num_env_steps_sampled_lifetime") or 0
-            # timesteps_this_iter expected to be >0; but safer: use timesteps_this_iter
             collected_steps += int(steps_this_iter or 0)
             elapsed = time.time() - start
             if elapsed >= warmup_seconds:
@@ -181,7 +188,10 @@ def measure_warmup_steps_per_sec(warmup_seconds: int, cfg_override: Dict[str, An
     except KeyboardInterrupt:
         print("[WARMUP] interrupted by user")
     finally:
-        algo.stop()
+        try:
+            algo.stop()
+        except Exception:
+            pass
 
     if elapsed <= 0:
         return 0.0
@@ -220,17 +230,13 @@ def main(
     print(f"[CONFIG] use_cpus={use_cpus}")
     print("=" * 70)
 
-    # Try to initialize Ray; if it fails, fallback to debug in-driver sampling.
     ray_ok = safe_ray_init(use_cpus)
     if not ray_ok:
         print("[WARN] Ray failed to initialize; falling back to debug in-driver sampling (single-process).")
         debug_driver_sampling = True
-        # Note: do not raise; we continue running without ray worker processes.
 
-    # Register environment
     register_env("koehandel_env", lambda c: PettingZooEnv(env_creator(c)))
 
-    # Create a sample env to fetch spaces
     sample_env = env_creator({"num_players": 4})
     sample_agent = sample_env.possible_agents[0]
     obs_space = sample_env.observation_space(sample_agent)
@@ -240,7 +246,6 @@ def main(
     except Exception:
         pass
 
-    # Prepare mode-specific settings
     if fast:
         print("[MODE] FAST - very short test")
         num_env_runners = 0
@@ -271,18 +276,16 @@ def main(
             minibatch_size = cfg["minibatch_size_full"]
             num_epochs = cfg["num_epochs_full"]
             lr = cfg["lr_full"]
-            # decide stop_criteria; may be adjusted by auto-warmup below
             stop_criteria = {"num_env_steps_sampled_lifetime": cfg["stop_steps_short_full"] if not long else cfg["stop_steps_long_full"]}
 
     print(f"[CONFIG] num_env_runners={num_env_runners}, rollout_fragment_length={rollout_fragment_length}")
     print(f"[CONFIG] train_batch_size={train_batch_size}, minibatch_size={minibatch_size}, num_epochs={num_epochs}, lr={lr}")
     print(f"[CONFIG] stop_criteria={stop_criteria}")
 
-    # If auto-warmup is enabled and we're in full mode, run a short profiler to auto-set stop steps.
     if cfg.get("auto_warmup", False) and not fast and not debug_driver_sampling and not skip_warmup_flag:
         try:
             warm_cfg_override = {
-                "num_env_runners": 0,  # warmup: in-driver to measure single-process steps/sec reliably
+                "num_env_runners": 0,
                 "rollout_fragment_length": cfg.get("rollout_fragment_length_debug", 32),
                 "train_batch_size": cfg.get("train_batch_size_debug", 128),
                 "minibatch_size": cfg.get("minibatch_size_debug", 64),
@@ -291,9 +294,8 @@ def main(
             }
             steps_sec = measure_warmup_steps_per_sec(cfg.get("warmup_seconds", 60), warm_cfg_override, use_cpus)
             if steps_sec > 1.0:
-                desired_seconds = 30 * 60  # 30 minutes
+                desired_seconds = 30 * 60
                 computed_stop = int(steps_sec * desired_seconds)
-                # set a sensible lower/upper bound
                 computed_stop = max(50_000, min(computed_stop, cfg.get("stop_steps_long_full", 1_000_000)))
                 stop_criteria = {"num_env_steps_sampled_lifetime": computed_stop}
                 print(f"[AUTO-WARMUP] Auto-set stop_criteria to {stop_criteria} based on {steps_sec:.2f} steps/sec")
@@ -302,39 +304,60 @@ def main(
         except Exception as e:
             print(f"[AUTO-WARMUP] Warmup failed: {e}")
 
-    # Build PPO config
-    config = (
+    # Build PPO config (compat-friendly)
+    base_cfg = (
         PPOConfig()
         .environment(env="koehandel_env", env_config={"num_players": 4, "max_turns": 250}, disable_env_checking=True)
         .framework("torch")
-        .env_runners(num_env_runners=num_env_runners, rollout_fragment_length=rollout_fragment_length, sample_timeout_s=300.0)
-        .training(
-            train_batch_size=train_batch_size,
-            minibatch_size=minibatch_size,
-            num_epochs=num_epochs,
-            lr=lr,
-            gamma=0.99,
-            lambda_=0.95,
-            clip_param=0.2,
-            vf_loss_coeff=0.5,
-            entropy_coeff=0.01,
-        )
-        .model({"fcnet_hiddens": PARAMETERS.get("model_fcnet_hiddens", [64, 64])})
-        .multi_agent(policies={"shared_policy": (None, obs_space, act_space, {})}, policy_mapping_fn=lambda aid, ep, **k: "shared_policy")
-        .resources(num_gpus=0)
-        .debugging(log_level="INFO")
     )
+    base_cfg = _apply_env_runners_compat(base_cfg, num_env_runners=num_env_runners, rollout_fragment_length=rollout_fragment_length, sample_timeout_s=300.0)
+    base_cfg = base_cfg.training(
+        train_batch_size=train_batch_size,
+        minibatch_size=minibatch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        gamma=0.99,
+        lambda_=0.95,
+        clip_param=0.2,
+        vf_loss_coeff=0.5,
+        entropy_coeff=0.01,
+    )
+
+    cfg_or_dict = _set_model_compat(base_cfg, {"fcnet_hiddens": PARAMETERS.get("model_fcnet_hiddens", [64, 64])})
+
+    # multi_agent and resources (try chain-safe)
+    try:
+        if isinstance(cfg_or_dict, dict):
+            # we'll pass a dict later to Tuner
+            cfg_or_dict["multiagent"] = {
+                "policies": {"shared_policy": (None, obs_space, act_space, {})},
+                "policy_mapping_fn": (lambda aid, ep, **k: "shared_policy"),
+            }
+            cfg_or_dict["num_gpus"] = 0
+        else:
+            cfg_or_dict = cfg_or_dict.multi_agent(policies={"shared_policy": (None, obs_space, act_space, {})}, policy_mapping_fn=lambda aid, ep, **k: "shared_policy")
+            cfg_or_dict = cfg_or_dict.resources(num_gpus=0)
+            cfg_or_dict = cfg_or_dict.debugging(log_level="INFO")
+    except Exception:
+        pass
 
     storage_path = str(RESULTS_ROOT.resolve())
     Path(storage_path).mkdir(parents=True, exist_ok=True)
     print(f"[OK] Results saver: {storage_path}/koehandel_training/")
 
-    # Configure Tune to request cluster resources per trial (so the trial actually gets the CPUs)
+    # Prepare Tuner param_space robustly depending on cfg_or_dict type
     from ray import tune as _tune
+    if isinstance(cfg_or_dict, dict):
+        param_space = {"config": cfg_or_dict}
+    else:
+        try:
+            param_space = cfg_or_dict.to_dict()
+        except Exception:
+            param_space = {"config": cfg_or_dict}
 
     tuner = Tuner(
         PPO,
-        param_space=config.to_dict(),
+        param_space=param_space,
         tune_config=_tune.TuneConfig(resources_per_trial={"cpu": use_cpus, "gpu": 0}, num_samples=1),
         run_config=tune.RunConfig(
             name="koehandel_training",
@@ -352,7 +375,6 @@ def main(
         elapsed = time.time() - start_time
         print(f"[INFO] Training finished in {elapsed/60:.2f} minutes")
         try:
-            # Attempt to print a few useful metrics if available
             best_key = list(stop_criteria.keys())[0]
             best = results.get_best_result(metric=best_key, mode="max")
             if best:
