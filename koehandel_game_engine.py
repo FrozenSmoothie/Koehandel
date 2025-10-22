@@ -104,7 +104,12 @@ class KoehandelPettingZooEnv(AECEnv):
         self.agents = self.possible_agents[:]  # active agents list for pettingzoo API
         self.max_turns = max_turns or 300
         self.current_agent: Optional[str] = None
-        self._agent_selector = agent_selector(self.agents)
+        # ensure agent_selector is callable whether it was imported as a module or a function
+        if hasattr(agent_selector, 'agent_selector'):
+            _agent_selector_callable = agent_selector.agent_selector
+        else:
+            _agent_selector_callable = agent_selector
+        self._agent_selector = _agent_selector_callable(self.agents)
         # observation and action spaces (kept stable and compatible with training script)
         # Observation: 22-d vector of floats (matches your earlier observed shape)
         # layout (example):
